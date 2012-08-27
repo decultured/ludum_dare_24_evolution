@@ -36,17 +36,21 @@ function description_proto:set_defaults(defaults)
     return self
 end
 
-function description_proto:set_many(table, options)
-    for k, v in pairs (table) do
-        self:set(k, v, {silent = true})
+function description_proto:set_many(list, options)
+    if type(list) ~= "table" then
+        error(self, list, options)
+        return
+    end
+    for k, v in pairs (list) do
+        self:set(k, v, options)
     end
     self:commit()
     return self
 end
 
 function description_proto:set(attr, val, options)
-    if val == nil then
-        self:set_many(attr)
+    if val == nil and type(attr) == "table" then
+        self:set_many(attr, {silent=true})
         return self
     end
 
@@ -69,6 +73,45 @@ function description_proto:set(attr, val, options)
     return self
 end
 
+function description_proto:has_changed(field)
+    if not self.changed then
+        return false
+    end
+    return self.changed[field]
+end
+
+function description_proto:any_have_changed(...)
+    local arg
+    for i = 1, select("#", ...) do
+        arg = select(i, ...)
+        if self:has_changed(arg) then
+            return true
+        end
+    end
+    return false
+end
+
+function description_proto:all_have_changed(...)
+    local arg
+    for i = 1, select("#", ...) do
+        arg = select(i, ...)
+        if not self:has_changed(arg) then
+            return false
+        end
+    end
+    return true
+end
+
+function description_proto:check_for_new_changes(was_changed, all_changed, new_changes)
+    for k, v in pairs(self.changed) do
+        if not was_changed[k] then
+            table.insert(all_changed, k)
+            new_changes[k] = 1
+            was_changed[k] = 1
+        end
+    end
+end
+
 function description_proto:commit(skip_validation)
     if not self.changed or self.committing then
         return self
@@ -80,12 +123,19 @@ function description_proto:commit(skip_validation)
 
     self.committing = true
 
-    for k, v in pairs(self.changed) do
-        self.events:trigger(k, self.fields[k], self)
+    local was_changed = {}
+    local all_changed = {}
+    local new_changes = {}
+    self:check_for_new_changes(was_changed, all_changed, new_changes)
+    
+    for k, v in ipairs(all_changed) do
+        self.events:trigger(v, self.fields[v], self)
+        new_changes[v] = nil
+        self:check_for_new_changes(was_changed, all_changed, new_changes)
     end
     self.events:trigger("changed", self, self)
 
-    self.changed = nil
+    self.changed = new_changes
     self.committing = false
 
     return self
@@ -218,6 +268,17 @@ function description_proto:add_definitions(definitions)
         self:add_definitions(v)
     end
 
+    for k, v in pairs(def.methods) do
+        if type(v) ~= "function" or type(k) ~= "string" then
+            warning("invalid method in definition table")
+            return false
+        elseif table_utils.contains_key(self, k) then
+            warning("Description method shares a used key in description, aborting assignment.")
+        else
+            self[k] = v
+        end
+    end
+
     def.events:trigger("apply", def, self)
 
     return self
@@ -255,16 +316,18 @@ end
 description_proto.__index = description_proto
 
 function M.workon(name, definitions)
-    local result = M.fetch(name, definitions)
+    local result = M.fetch(name, definitions, suppress)
     if not result then
         return M.create(name, definitions)
     end
     return result
 end
 
-function M.fetch(name, definitions)
+function M.fetch(name, definitions, suppress)
     if not name then
-        error ("Description name must not be nil")
+        if not suppress then
+            error ("Description name must not be nil")
+        end
         return false
     end
 
@@ -299,7 +362,7 @@ function M.create(name, definitions)
                                 fields = {},
                                 changed = nil,
                                 definitions = {},
-                                events = event_pump.create(name)            
+                                events = event_pump.workon(name .. "_events")
                             }
 
     setmetatable(new_description, description_proto)

@@ -54,13 +54,20 @@ local encodeString
 local isArray
 local isEncodable
 
+local json_max_depth = 1024 -- This is to prevent stack overflows
+
 -----------------------------------------------------------------------------
 -- PUBLIC FUNCTIONS
 -----------------------------------------------------------------------------
 --- Encodes an arbitrary Lua object / variable.
 -- @param v The Lua object / variable to be JSON encoded.
 -- @return String containing the JSON encoding in internal Lua string format (i.e. not unicode)
-function encode (v)
+function encode (v, max_depth, depth)
+  max_depth = max_depth or json_max_depth
+  depth = (depth or 0) + 1
+  if max_depth and max_depth < depth then
+    return ""
+  end
   -- Handle nil values
   if v==nil then
     return "null"
@@ -330,6 +337,9 @@ end
 -- @param s The string to return as a JSON encoded (i.e. backquoted string)
 -- @return The string appropriately escaped.
 function encodeString(s)
+  if base.type(s) ~= "string" then
+      return ""
+  end
   s = string.gsub(s,'\\','\\\\')
   s = string.gsub(s,'"','\\"')
   s = string.gsub(s,"'","\\'")

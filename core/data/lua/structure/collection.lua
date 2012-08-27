@@ -13,57 +13,69 @@ local imports = {"each", "map", "reduce", "find", "filter", "select", "every", "
 
 for k, v in pairs(imports) do
     collection_proto[v] = function (self, ...)
-        return table_utils[v](self.descriptions, ...)
+        return table_utils[v](self.list, ...)
     end
+end
+
+function collection_proto:len()
+    return #self.list
+end
+
+function collection_proto:get(index)
+    return self.list[index]
 end
 
 function collection_proto:add(target)
     if not target or
-        not type(target) == "table" or
-        not target.data_type == "description" then
-            print (target)
-            error("Collections store only descriptions")
+        type(target) ~= "table" or
+        target.data_type ~= "description" then
+            error("Collections store only descriptions, provided:" .. tostring(target))
             return false
     end
 
     for k, v in pairs(self.definitions) do
-        if not target:has_definition(v) then
-            error ("Target " .. target.name .. " does not have the required definition: " .. v)
+        if not target.has_definition or not target:has_definition(v) then
+            error ("Target " .. target.name .. " does not have the required definition: " .. v .. tostring(target))
             return false
         end
     end
 
-    table.insert(self.descriptions, target)
+    table.insert(self.list, target)
 
+    if not self.events then
+        print("XXXXXX", self.name)
+    else
     self.events:trigger("add", target, self)
 end
+end
 
-function collection_proto:add_many(targets)
-    for k, v in targets do
-        self:add(v)
+function collection_proto:add_many(...)
+    for i = 1, select("#", ...) do
+        arg = select(i, ...)
+        self:add(arg)
     end
 end
 
 function collection_proto:remove(target)
-    for k, v in ipairs(self.descriptions) do
+    for k, v in ipairs(self.list) do
         if v == target then
-            table.remove(self.descriptions, k)
+            table.remove(self.list, k)
             self.events:trigger("remove", target, self)
         end
     end
 end
 
 function collection_proto:clear()
-    for k, v in ipairs(self.descriptions) do
+    for k, v in ipairs(self.list) do
         self.events:trigger("remove", v, self)
-        self.descriptions[k] = nil
+        self.list[k] = nil
     end
-    self.descriptions = {}
+    self.list = {}
     self.events:trigger("reset", self, self)
 end
 
 function collection_proto:trigger_all(event, data)
-    local desc = self.descriptions
+    local desc = self.list
     local item 
 
     for i = 1,#desc do
@@ -73,7 +85,7 @@ function collection_proto:trigger_all(event, data)
 end
 
 function collection_proto:trigger_all_until(event, data)
-    local desc = self.descriptions
+    local desc = self.list
     local item 
 
     for i = 1,#desc do
@@ -85,7 +97,7 @@ function collection_proto:trigger_all_until(event, data)
 end
 
 function collection_proto:reverse_trigger_all(event, data)
-    local desc = self.descriptions
+    local desc = self.list
     local item 
 
     for i = #desc,1,-1 do
@@ -95,7 +107,7 @@ function collection_proto:reverse_trigger_all(event, data)
 end
 
 function collection_proto:reverse_trigger_all_until(event, data)
-    local desc = self.descriptions
+    local desc = self.list
     local item 
 
     for i = #desc,1,-1 do
@@ -128,12 +140,13 @@ end
 
 collection_proto.__index = collection_proto
 
-local function base_collection()
+local function base_collection(name)
     return  {
+                name = name,
                 data_type = "collection",
                 definitions = {},
-                descriptions = {},
-                events = event_pump.create()
+                list = {},
+                events = event_pump.workon(name .. "_events")
             }
 end
 
@@ -169,10 +182,9 @@ function M.create(name, definitions)
         return false
     end
 
-    local new_collection = base_collection()
+    local new_collection = base_collection(name)
 
     setmetatable(new_collection, collection_proto)
-    new_collection.name = name
 
     new_collection:add_definitions(definitions)
 
